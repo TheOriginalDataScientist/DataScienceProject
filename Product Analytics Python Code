@@ -1,0 +1,450 @@
+###--- Importing required packages ---###
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import sklearn
+import statsmodels.api as sm
+import scipy
+import random
+
+# for inline plots in jupyter
+%matplotlib inline
+
+# for logistic regression
+from sklearn.linear_model import LogisticRegression
+
+# for model evaluation
+from sklearn.metrics import confusion_matrix, classification_report
+
+# for pre-processing
+from sklearn import preprocessing
+
+# for fitting distribution
+from scipy import stats
+
+# for pipeline and SMOTE
+from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import make_pipeline
+from imblearn.pipeline import pipeline
+
+from sklearn.model_selection import GridSearchCV
+
+###--- Data Processing ---###
+
+# Reading Data
+df1 = pd.read_csv("loans_2018.csv")
+df1.head()
+
+# getting metrics on data
+print(df1.shape)
+df1.describe()
+
+# just from looking at the count, I could say that not all rows of the 1048575 have values in all the columns 
+# Also the columns id and member id have only null values, so we can get rid of these two
+
+# Data wrangling
+df2 = df1[df1.columns[2:145]]
+df3 = df2.dropna(axis=0, how = 'all')
+print(df3.shape)
+df3.head()
+
+#----- Question 1: Explore the distribution of loans amounts, does the interest rate increase with the size of the loan? -----#
+
+# settings for seaborn plotting style
+sns.set(color_codes=True)
+
+# settings for seaborn plot sizes
+sns.set(rc={'figure.figsize':(5,5)})
+
+##-- distribution of loan amount --##
+
+#- Density Plot and Histogram of all loan amount -#
+#x0 = np.array(df3['loan_amnt']).reshape(-1,1)
+x0 = df3['loan_amnt']
+
+print("Summary statistics for loan amount")
+print("    ")
+print(df3['loan_amnt'].describe())
+
+plt.hist(x0, bins = 20)
+plt.title('Histogram of Loan Amount')
+plt.xlabel('loan amount in $')
+plt.ylabel('Frequency')
+plt.show()
+
+sns.distplot(x0, 
+             hist=True,  
+             bins=20, 
+             color = 'darkblue', 
+             hist_kws={'edgecolor':'black'},
+             kde_kws={'linewidth': 4})
+
+#sns.distplot(x0, fit=stats.laplace, kde=False)
+
+plt.title('Distribution of Loan Amount')
+plt.xlabel('loan amount in $')
+plt.ylabel('PDF')
+
+plt.show()
+
+# checking for gamma distribution fit
+# sns.distplot(x0, 
+#              fit=stats.gamma, 
+#              kde=False)
+
+# plt.title('Distribution of Loan Amount')
+# plt.xlabel('loan amount in $')
+# plt.ylabel('PDF')
+
+# plt.show()
+
+#- cumulative distribution function -#
+
+# Values of the CDF
+xx = np.array(df3['loan_amnt'])
+cdf = scipy.stats.norm.cdf(xx, 16025, 10138)
+plt.rcParams['agg.path.chunksize'] = 10000
+
+# Make the plot
+plt.plot(xx, cdf)
+plt.xlabel ("loan amount")
+plt.ylabel("CDF")
+#plt.margins(x=10)
+
+plt.show()
+
+##-- dependency of interest rate on loan amount --##
+
+#- visual representation of the loan amount and int rate -#
+x1 = np.array(df3['loan_amnt']).reshape(-1,1) #.reshape() on x because this array is required to be two-dimensional, 
+                                              # or to be more precise, to have one column and as many rows as necessary
+y1 = np.array(df3['int_rate'])
+
+x_norm = preprocessing.scale(x1)
+y_norm = preprocessing.scale(y1)
+
+print(x_norm)
+print(y_norm)
+print("   ")
+
+plt.scatter(x_norm, y_norm)
+plt.title('Scatter plot of int rate vs loan amount')
+plt.xlabel('loan amount')
+plt.ylabel('interest rate')
+plt.show()
+
+model = sm.OLS(y_norm, x_norm)
+results = model.fit()
+print(results.summary())
+
+# It is not clear looking at the visualization what the relation between interest rate and loan amount could be.
+# A good way to find the dependency is through linear regression 
+
+# #- Linear Regression -#
+from sklearn.linear_model import LinearRegression
+
+# creating model 
+model = LinearRegression().fit(x_norm,y_norm)
+
+# Analyzing the model
+
+print("   ")
+print('intercept:', model.intercept_) #model parameters
+print('slope:', model.coef_)
+
+r_square = round(model.score(x_norm, y_norm),7) # coefficient of determination (𝑅²). ***********Find P value!!!************
+# if p value is low and r sq are high.. you can use this model to predict the other because you have used good amount of
+# variance is being explained by the model. 
+# since pvalue and R are both low, one variable cannot be used for predicting the other but they are correlated. 
+# p value is used for hypothesis testing. Null hypothesis: both variables aren't dependent on each other and alternate is vice cersa
+# print('coefficient of determination:', r_square) # in general, the higher the R-squared, the better the model fits your data.
+
+#----- Question 2: Do the monthly payment (installment) and interest rate together have any effect on the loan status? -----#
+
+##-- Filtering Data --##
+
+df4 = df3[['int_rate','installment','loan_status']]
+#df4 = df4[df4['loan_status'] != 'Current']
+print(df4.shape)
+df4.head()
+
+# we then classify current and fully-paid as non-delinquent by assigning it value of 0 and the rest as delinquent by 
+# assigning it a value of 1. By assigning delinquent a value of 1 we are now going to predict for delinquent. 
+
+#df4['loan_class'] = df4['loan_status'].apply(lambda x: 0 if x == 'Fully Paid' else 1)
+df4['loan_class'] = df4['loan_status'].apply(lambda x: 0 if x == 'Fully Paid' or x == 'Current' else 1)
+print(df4.shape)
+df4.head()
+
+#-- Undersampling the dataset --#
+y = df4['loan_class']
+#df4
+x = y.values.tolist()
+t = 0
+
+for a in range(len(x)):
+    if (x[a] == 0 and bool(random.getrandbits(1))):
+        x[a] = 2
+        t = t + 1
+    if t == 30648:
+        break
+
+df4['column1'] = x
+df4 = df4[df4.column1 != 0]
+
+print(df4.shape)
+df4.head()
+
+######------ Logistic Regression Modelling ------######
+
+#-- defining predictors and response variables --#
+X = df4[['int_rate','installment']] # split features from loan class
+Y = df4[['loan_class']]
+
+#-- creating training and test data --#
+
+X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.30, random_state = 23, shuffle = True)
+
+#-- verifying the training and test data --#
+print(X_train.shape)
+print(Y_train.shape)
+print("    ")
+print(X_test.shape)
+print(Y_test.shape)
+print("    ")
+
+#-- verifying the train and test data has has 70:30 split --#
+
+num_neg_train = (Y_train==0).sum()
+num_pos_train = (Y_train==1).sum()
+
+num_neg_test = (Y_test==0).sum()
+num_pos_test = (Y_test==1).sum()
+
+print(num_neg_train)
+print(num_pos_train)
+print(round(num_neg_train/num_pos_train,2))
+print("    ")
+print(num_neg_test)
+print(num_pos_test)
+print(round(num_neg_test/num_pos_test,2))
+
+# # the dataset is highly imbalanced with the ratio of 0 : 1 = 27, so we will balance the train dataset by undersampling.
+
+# ##-- dataset balancing by under-sampling --##
+# #y = df4['loan_class']
+# y = Y_train['loan_class']
+# #df4
+# x = y.values.tolist()
+# t = 0
+
+# for a in range(len(x)):
+#     if (x[a] == 0 and bool(random.getrandbits(1))):
+#         x[a] = 2
+#         t = t + 1
+#     if t == 12362:
+#         break
+
+
+# X_train['column1'] = x
+# Y_train['column1'] = x
+
+
+# X_train = X_train[X_train.column1 != 0]
+# Y_train = Y_train[Y_train.column1 != 0]
+
+# X_train = X_train[['int_rate','installment']]
+# Y_train = Y_train[['loan_class']]
+
+# print(X_train)
+# print(Y_train)
+
+
+# ## I am commenting this value because I will do undersampling before splitting in test and train data. 
+# ## I am going to do this because even the Test data is heavily biased.
+
+#-- multicollinearity between the data points --#
+
+# scatter plot 
+
+x2 = X_train['int_rate']
+x1 = X_train['installment']
+
+plt.scatter(x1, x2)
+plt.title('Scatter plot of independent variable')
+plt.xlabel('int_rate')
+plt.ylabel('installment')
+plt.show()
+
+# correlation coefficient
+corr_df = X_train.corr(method = 'pearson')
+
+sns.heatmap(corr_df, cmap = "YlGnBu", vmax = 1.0, vmin = -1.0, linewidth = 2.5)
+
+print(corr_df)
+
+plt.yticks(rotation = 0)
+plt.xticks(rotation = 90)
+plt.show()
+
+# so there is some correlation between interest rate and installment but it isn't very significant. 
+# We can proceed with taking interest rate and installment as the features of the 
+
+#-- Model using Scikit-learn package--#
+
+# creating model
+from sklearn.linear_model import LogisticRegression
+from sklearn import metrics
+
+logreg = LogisticRegression()
+logreg.fit(X_train,Y_train)
+y_pred_skl=logreg.predict(X_test)
+
+# Evaluate the model
+print(classification_report(Y_test, y_pred_skl))
+
+# confusion matrix accuracy of the model
+cnf_matrix = metrics.confusion_matrix(Y_test, y_pred_skl)
+
+print(cnf_matrix)
+
+# create heatmap
+
+class_names=[0,1] # name  of classes
+fig, ax = plt.subplots()
+tick_marks = np.arange(len(class_names))
+plt.xticks(tick_marks, class_names)
+plt.yticks(tick_marks, class_names)
+
+sns.heatmap(pd.DataFrame(cnf_matrix), annot=True, cmap="YlGnBu" ,fmt='g')
+ax.xaxis.set_label_position("top")
+plt.tight_layout()
+plt.title('Confusion matrix', y=1.1)
+plt.ylabel('Actual label')
+plt.xlabel('Predicted label')
+
+# Since the precision and recall is pretty low, I wil try to improve the model by creating a balanced sample and feature scaling
+
+#- Improving Model -#
+
+# Feature Scaling
+from sklearn.preprocessing import RobustScaler
+
+X_N = df4[['int_rate','installment']] # split features from loan class
+Y_N = df4[['loan_class']]
+
+scaler = RobustScaler() # scale features
+X_N = scaler.fit_transform(X_N)
+
+X_N
+
+num_neg = (Y_N == 0).sum()
+num_pos = (Y_N == 1).sum()
+
+print(num_neg)
+print(num_pos)
+print(round(num_pos/num_neg,2))
+
+# Split into test and train
+
+X_N_train, X_N_test, Y_N_train, Y_N_test = train_test_split(X_N, Y_N, test_size=0.30, shuffle = True)
+
+#-- verifying the training and test data --#
+print(X_N_train.shape)
+print(X_N_test.shape)
+print(Y_N_train.shape)
+print(Y_N_test.shape)
+print("    ")
+
+
+#-- verifying the train and test data has has 70:30 split --#
+num_neg_train = (Y_N_train ==0).sum()
+num_pos_train = (Y_N_train==1).sum()
+
+num_neg_test = (Y_N_test==0).sum()
+num_pos_test = (Y_N_test==1).sum()
+
+print(num_neg_train)
+print(num_pos_train)
+print(round(num_neg_train/num_pos_train,2))
+print("    ")
+print(num_neg_test)
+print(num_pos_test)
+print(round(num_neg_test/num_pos_test,2))
+
+# creating balanced sample
+
+# import warnings
+# warnings.filterwarnings("ignore", category=FitFailedWarning) 
+
+pipe = make_pipeline(SMOTE(), LogisticRegression())
+
+#pipe = pipeline([('sampling', SMOTE()), 
+#                  ('classification', LogisticRegression())
+#                 ]
+#                )
+
+#   find if a good paramter to use in logistic function
+
+#weights = np.linspace(0.43, 1.00, 2) 
+weights = np.linspace(0.005, 1.0, 100)
+
+gsc = GridSearchCV(estimator=pipe,
+                   param_grid={
+                       #'smote__sampling_strategy' : [{0: int(num_neg * w) } for w in weights]
+                       #'smote__sampling_strategy':  [{0:int(num_neg)}]
+                       'smote__sampling_strategy': weights
+                   },
+                   scoring='f1',
+                   cv=5
+                  )
+
+
+grid_result = gsc.fit(X_N, Y_N)
+
+print("Best parameters : %s" % grid_result.best_params_)
+
+# Plot the weights vs f1 score
+dataz = pd.DataFrame({ 'score': grid_result.cv_results_['mean_test_score'],
+                       'weight': weights })
+dataz.plot(x='weight')
+
+# modeling
+
+pipe = make_pipeline(
+    SMOTE(sampling_strategy=1.0),
+    LogisticRegression()
+)
+
+# Fit..
+pipe.fit(X_N_train, Y_N_train)
+
+# Predict
+Y_N_pred = pipe.predict(X_N_test)
+
+# Evaluate the model
+print(classification_report(Y_N_test, Y_N_pred))
+
+# plot confusion matrix
+cnf_matrix = metrics.confusion_matrix(Y_N_test, Y_N_pred)
+
+print(cnf_matrix)
+
+# create heatmap
+
+class_names=[0,1] # name  of classes
+fig, ax = plt.subplots()
+tick_marks = np.arange(len(class_names))
+plt.xticks(tick_marks, class_names)
+plt.yticks(tick_marks, class_names)
+
+sns.heatmap(pd.DataFrame(cnf_matrix), annot=True, cmap="YlGnBu" ,fmt='g')
+ax.xaxis.set_label_position("top")
+plt.tight_layout()
+plt.title('Confusion matrix', y=1.1)
+plt.ylabel('Actual label')
+plt.xlabel('Predicted label')
+
+
+
